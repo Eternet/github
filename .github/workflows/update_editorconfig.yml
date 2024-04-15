@@ -24,6 +24,6 @@ jobs:
         run: |
           git config --global user.name "GithubActionBot"
           git config --global user.email "<>"
-          git add .editorconfig
+          git add ${{ inputs.editorconfig-output-path }}
           git commit -m "Update .editorconfig"
           git push
