@@ -3,7 +3,7 @@ name: Update .editorconfig
 on:
   workflow_call:
     inputs:
-      editorconfig-output-path:
+      editorconfig-path:
         required: true
         type: string
 
@@ -18,12 +18,12 @@ jobs:
         run: git clone --depth 1 https://github.com/Eternet/github.git tmp_repo
 
       - name: Copy .editorconfig from cloned repository
-        run: cp tmp_repo/files/.editorconfig ${{ inputs.editorconfig-output-path }}
+        run: cp tmp_repo/files/.editorconfig ${{ inputs.editorconfig-path }}
         
       - name: Commit and push changes
         run: |
           git config --global user.name "GithubActionBot"
           git config --global user.email "<>"
-          git add ${{ inputs.editorconfig-output-path }}
+          git add ${{ inputs.editorconfig-path }}
           git commit -m "Update .editorconfig"
           git push
