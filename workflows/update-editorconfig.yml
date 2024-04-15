@@ -1,0 +1,27 @@
+name: Update .editorconfig
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # Ejecutar a las 00:00 hora argentina todos los días
+  workflow_dispatch: # Trigger manual
+
+jobs:
+  update_editorconfig:
+    runs-on: [self-hosted]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clone Eternet/github repository
+        run: git clone --depth 1 https://github.com/Eternet/github.git tmp_repo
+
+      - name: Copy .editorconfig from cloned repository
+        run: cp tmp_repo/files/.editorconfig ${{ inputs.editorconfig-output-path }}
+        
+      - name: Commit and push changes
+        run: |
+          git config --global user.name "GithubActionBot"
+          git config --global user.email "<>"
+          git add .editorconfig
+          git commit -m "Update .editorconfig"
+          git push
