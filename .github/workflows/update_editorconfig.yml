@@ -15,10 +15,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Clone Eternet/github repository
-        run: git clone --depth 1 https://github.com/Eternet/github.git tmp_repo
+        run: git clone --depth 1 https://github.com/Eternet/github.git tmp_eternet_github_repo
 
       - name: Copy .editorconfig from cloned repository
-        run: cp tmp_repo/files/.editorconfig ${{ inputs.editorconfig-path }}
+        run: cp tmp_eternet_github_repo/files/.editorconfig ${{ inputs.editorconfig-path }}
         
       - name: Commit and push changes
         run: |
