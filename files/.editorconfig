@@ -1,5 +1,5 @@
 ###############################
-# Eternet.EditorConfig v1.0.0 #
+# Eternet.EditorConfig v1.0.1 #
 ###############################
 root = true
 
@@ -151,6 +151,7 @@ csharp_style_expression_bodied_lambdas = true:silent
 csharp_style_expression_bodied_local_functions = false:silent
 csharp_style_prefer_method_group_conversion = true:silent
 csharp_style_prefer_top_level_statements = true:silent
+csharp_style_prefer_primary_constructors = true:suggestion
 
 # CS8073: The result of the expression is always the same since a value of this type is never equal to 'null'
 dotnet_diagnostic.CS8073.severity = none
@@ -160,3 +161,4 @@ dotnet_diagnostic.CA1822.severity = none
 
 # Warnings on missing forward pass of cancellation tokens
 dotnet_diagnostic.CA2016.severity = warning
+dotnet_diagnostic.CA1068.severity = warning
