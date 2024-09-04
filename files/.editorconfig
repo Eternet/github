@@ -1,5 +1,5 @@
 ###############################
-# Eternet.EditorConfig v1.0.2 #
+# Eternet.EditorConfig v1.0.3 #
 ###############################
 root = true
 
@@ -162,6 +162,10 @@ dotnet_diagnostic.CA1822.severity = none
 # Warnings on missing forward pass of cancellation tokens
 dotnet_diagnostic.CA2016.severity = warning
 dotnet_diagnostic.CA1068.severity = warning
+
+# Warnings on properties with bad case
+dotnet_diagnostic.CA1707.severity = warning
+dotnet_diagnostic.CA1006.severity = warning
 
 # xUnit
 dotnet_diagnostic.xUnit1042.severity = warning
