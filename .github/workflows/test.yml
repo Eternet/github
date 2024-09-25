@@ -1,0 +1,30 @@
+name: Test
+on:
+    workflow_call:
+        inputs:
+            project-paths:
+                description: "Array of paths to individual project files to test"
+                required: true
+                type: list
+
+jobs:
+    test:
+        runs-on: self-hosted
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.head.sha }}
+
+            - name: Setup .NET
+              uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: "8.0.204"
+
+            - name: Run tests for each project
+              shell: pwsh
+              run: |
+                  $projectPaths = @(${{ inputs.project-paths }})
+                  foreach ($project in $projectPaths) {
+                    dotnet test $project -c Release --verbosity=normal
+                  }
