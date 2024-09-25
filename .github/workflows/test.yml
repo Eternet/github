@@ -5,7 +5,7 @@ on:
       paths:
         description: "Array of paths to .sln or .csproj files"
         required: true
-        type: list
+        type: string
 
 jobs:
   test:
@@ -24,7 +24,8 @@ jobs:
       - name: Run tests for each path
         shell: pwsh
         run: |
-          $paths = @(${{ inputs.paths }})
+          # Parse the input string to a JSON array
+          $paths = ConvertFrom-Json -InputObject '${{ inputs.paths }}'
           foreach ($path in $paths) {
             dotnet test $path -c Release --verbosity=normal
           }
