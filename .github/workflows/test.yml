@@ -1,0 +1,30 @@
+name: Test
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: "Array of paths to .sln or .csproj files"
+        required: true
+        type: list
+
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.head.sha }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.204"
+
+      - name: Run tests for each path
+        shell: pwsh
+        run: |
+          $paths = @(${{ inputs.paths }})
+          foreach ($path in $paths) {
+            dotnet test $path -c Release --verbosity=normal
+          }
