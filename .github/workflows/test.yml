@@ -10,6 +10,8 @@ on:
 jobs:
   test:
     runs-on: self-hosted
+    env:
+      DOTNET_VERSION: '8.0.x'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,7 +21,11 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.204"
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+  
+      - name: Create .NET global.json
+        run: |
+          dotnet new globaljson --sdk-version $env:DOTNET_VERSION
 
       - name: Run tests for each path
         shell: pwsh
