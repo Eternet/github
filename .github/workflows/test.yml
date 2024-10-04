@@ -1,37 +1,37 @@
 name: Test
 on:
-  workflow_call:
-    inputs:
-      paths:
-        description: "Array of paths to .sln or .csproj files"
-        required: true
-        type: string
+    workflow_call:
+        inputs:
+            paths:
+                description: "Array of paths to .sln or .csproj files"
+                required: true
+                type: string
 
 jobs:
-  test:
-    runs-on: self-hosted
-    env:
-      DOTNET_VERSION: '8.0.x'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.head.sha }}
+    test:
+        runs-on: self-hosted
+        env:
+            DOTNET_VERSION: "8.0.x"
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.head.sha }}
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-  
-      - name: Create .NET global.json
-        run: |
-          dotnet new globaljson --sdk-version $env:DOTNET_VERSION
+            - name: Setup .NET
+              uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Run tests for each path
-        shell: pwsh
-        run: |
-          # Parse the input string to a JSON array
-          $paths = ConvertFrom-Json -InputObject '${{ inputs.paths }}'
-          foreach ($path in $paths) {
-            dotnet test $path -c Release --verbosity=normal
-          }
+            - name: Create .NET global.json
+              run: |
+                  dotnet new globaljson --sdk-version $env:DOTNET_VERSION
+
+            - name: Run tests for each path
+              shell: pwsh
+              run: |
+                  # Parse the input string to a JSON array
+                  $paths = ConvertFrom-Json -InputObject '${{ inputs.paths }}'
+                  foreach ($path in $paths) {
+                    dotnet test $path -c Release --verbosity=minimal
+                  }
