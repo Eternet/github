@@ -12,13 +12,14 @@ jobs:
         runs-on: self-hosted
         env:
             DOTNET_VERSION: "9.0.x"
+            RAM_PACKAGES: C:\RamNuget\packages
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
               with:
                   ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.head.sha }}
 
-            - name: Setup .NET (& NuGet cache)
+            - name: Setup .NET and NuGet cache
               uses: actions/setup-dotnet@v4
               with:
                   dotnet-version: ${{ env.DOTNET_VERSION }}
@@ -27,6 +28,11 @@ jobs:
                       **/*.sln
                       **/*.csproj
                       **/*.fsproj
+
+            - name: Init RAM‑disk
+              shell: pwsh
+              run: |  
+                  if (-not (Test-Path $Env:RAM_PACKAGES)) { New-Item -ItemType Directory -Path $Env:RAM_PACKAGES }
 
             - name: Create .NET global.json
               run: |
@@ -38,5 +44,5 @@ jobs:
                   # Parse the input string to a JSON array
                   $paths = ConvertFrom-Json -InputObject '${{ inputs.paths }}'
                   foreach ($path in $paths) {
-                    dotnet test $path -c Release --verbosity=minimal
+                    dotnet test $path -c Release --verbosity=minimal -p:RestorePackagesPath="${{ env.RAM_PACKAGES }}"
                   }
