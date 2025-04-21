@@ -12,16 +12,22 @@ jobs:
         runs-on: self-hosted
         env:
             DOTNET_VERSION: "9.0.x"
+            NUGET_PACKAGES: R:\NuGetCache
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
               with:
                   ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || github.event.pull_request.head.sha }}
 
-            - name: Setup .NET
+            - name: Setup .NET (& NuGet cache)
               uses: actions/setup-dotnet@v4
               with:
                   dotnet-version: ${{ env.DOTNET_VERSION }}
+                  cache: true
+                  cache-dependency-path: |
+                      **/*.sln
+                      **/*.csproj
+                      **/*.fsproj
 
             - name: Create .NET global.json
               run: |
