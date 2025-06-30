@@ -27,11 +27,32 @@ jobs:
               run: |
                   dotnet new globaljson --sdk-version $env:DOTNET_VERSION
 
-            - name: Run tests for each path
+            - name: Run format and tests for each path
               shell: pwsh
               run: |
                   # Parse the input string to a JSON array
                   $paths = ConvertFrom-Json -InputObject '${{ inputs.paths }}'
                   foreach ($path in $paths) {
-                    dotnet test $path -c Release --verbosity=minimal
+                    dotnet format $path --verify-no-changes
+                    dotnet test $path -c Release --verbosity=minimal --results-directory TestResults -- --report-trx --report-trx-filename AllTests.trx
                   }
+
+            - name: Publish test results
+              uses: Eternet/publish-unit-test-result-action/windows@v2
+              if: always()
+              with:
+                  files: "**/TestResults/**/*.trx"
+                  check_name: Tests
+                  job_summary: true
+
+            - name: Debug TestResults
+              if: always()
+              run: dir **\TestResults\*
+
+            - name: Upload TestResults artifact
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: TestResults
+                  path: "**/TestResults/**/*.trx"
+                  retention-days: 7
