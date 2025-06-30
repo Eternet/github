@@ -1,0 +1,15 @@
+name: Format
+on:
+    workflow_call:
+        inputs:
+            path:
+                description: "Path to .sln file"
+                required: true
+                type: string
+
+jobs:
+    format:
+        runs-on: self-hosted
+        steps:
+            - name: Execute dotnet format
+              run: dotnet format ${{ inputs.path }} --verify-no-changes

@@ -27,13 +27,12 @@ jobs:
               run: |
                   dotnet new globaljson --sdk-version $env:DOTNET_VERSION
 
-            - name: Run format and tests for each path
+            - name: Run tests for each path
               shell: pwsh
               run: |
                   # Parse the input string to a JSON array
                   $paths = ConvertFrom-Json -InputObject '${{ inputs.paths }}'
                   foreach ($path in $paths) {
-                    dotnet format $path --verify-no-changes
                     dotnet test $path -c Release --verbosity=minimal --results-directory TestResults -- --report-trx --report-trx-filename AllTests.trx
                   }
 
