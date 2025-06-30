@@ -1,4 +1,4 @@
-name: Format
+name: Dotnet format
 on:
     workflow_call:
         inputs:
