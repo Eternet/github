@@ -9,7 +9,7 @@ on:
 
 jobs:
   update_editorconfig:
-    runs-on: [self-hosted]
+    runs-on: [self-hosted, Windows]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

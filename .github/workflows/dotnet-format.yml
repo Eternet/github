@@ -9,7 +9,7 @@ on:
 
 jobs:
     format:
-        runs-on: self-hosted
+        runs-on: [self-hosted, Windows]
         steps:
             - name: Execute dotnet format
               run: dotnet format ${{ inputs.path }} --verify-no-changes
