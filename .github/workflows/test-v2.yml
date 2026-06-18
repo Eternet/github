@@ -1,0 +1,218 @@
+name: Test v2
+
+on:
+    workflow_call:
+        inputs:
+            paths:
+                description: "Ordered JSON array, comma-separated list, or newline-separated list of .sln/.csproj paths."
+                required: true
+                type: string
+            dotnet-version:
+                description: ".NET SDK version to install."
+                required: true
+                type: string
+            requires-docker:
+                description: "Run a short Docker daemon preflight before tests."
+                required: false
+                type: boolean
+                default: false
+
+jobs:
+    test:
+        name: Test
+        runs-on: [self-hosted, Windows]
+        timeout-minutes: 60
+        env:
+            DOTNET_NOLOGO: "true"
+            NUGET_PACKAGES: 'C:\RamNuget\packages'
+            TEST_CONFIGURATION: Release
+            TEST_LONG_RUNNING_SECONDS: "60"
+            TEST_PATH_TIMEOUT_MINUTES: "15"
+            TEST_RESULTS_DIR: TestResults
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup .NET
+              uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: ${{ inputs.dotnet-version }}
+
+            - name: Check Docker daemon
+              if: ${{ inputs.requires-docker }}
+              shell: pwsh
+              timeout-minutes: 1
+              run: |
+                  docker version
+                  docker info --format "Docker daemon is available: {{.ServerVersion}}"
+
+            - name: Run tests
+              shell: pwsh
+              env:
+                  TEST_PATHS: ${{ inputs.paths }}
+              run: |
+                  $ErrorActionPreference = 'Stop'
+
+                  function Get-TestPaths {
+                      param([string] $RawPaths)
+
+                      try {
+                          $parsedPaths = ConvertFrom-Json -InputObject $RawPaths -ErrorAction Stop
+                          if ($parsedPaths -is [array]) {
+                              return @($parsedPaths | ForEach-Object { [string] $_ })
+                          }
+
+                          return @([string] $parsedPaths)
+                      }
+                      catch {
+                          return @(
+                              $RawPaths -split "(`r`n|`n|,)" |
+                                  ForEach-Object { $_.Trim() } |
+                                  Where-Object { $_ }
+                          )
+                      }
+                  }
+
+                  function Test-UsesMicrosoftTestingPlatform {
+                      if (Test-Path -LiteralPath 'global.json') {
+                          $globalJson = Get-Content -LiteralPath 'global.json' -Raw | ConvertFrom-Json
+                          if ($globalJson.test.runner -eq 'Microsoft.Testing.Platform') {
+                              return $true
+                          }
+                      }
+
+                      $projectFiles = Get-ChildItem -Path . -Recurse -File -ErrorAction SilentlyContinue |
+                          Where-Object {
+                              $_.Extension -in '.csproj', '.props', '.targets' -and
+                              $_.FullName -notmatch '\\(\.git|bin|obj|TestResults|artifacts)\\'
+                          }
+
+                      $mtpProperty = $projectFiles |
+                          Select-String -Pattern '<UseMicrosoftTestingPlatformRunner>\s*true\s*</UseMicrosoftTestingPlatformRunner>' -Quiet
+
+                      return [bool] $mtpProperty
+                  }
+
+                  function ConvertTo-DisplayArguments {
+                      param([string[]] $Arguments)
+
+                      return ($Arguments | ForEach-Object {
+                          if ($_ -match '\s') {
+                              '"' + ($_ -replace '"', '\"') + '"'
+                          }
+                          else {
+                              $_
+                          }
+                      }) -join ' '
+                  }
+
+                  function Invoke-ProcessWithTimeout {
+                      param(
+                          [string] $FilePath,
+                          [string[]] $Arguments,
+                          [TimeSpan] $Timeout,
+                          [string] $DisplayName
+                      )
+
+                      $displayArguments = ConvertTo-DisplayArguments -Arguments $Arguments
+                      Write-Host "> $FilePath $displayArguments"
+
+                      $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+                      $startInfo.FileName = $FilePath
+                      $startInfo.UseShellExecute = $false
+
+                      foreach ($argument in $Arguments) {
+                          [void] $startInfo.ArgumentList.Add($argument)
+                      }
+
+                      $process = [System.Diagnostics.Process]::Start($startInfo)
+                      if (-not $process.WaitForExit([int] $Timeout.TotalMilliseconds)) {
+                          Write-Host "::error title=Test path timed out::$DisplayName exceeded $($Timeout.TotalMinutes) minutes."
+                          taskkill.exe /PID $process.Id /T /F | ForEach-Object { Write-Host $_ }
+                          throw "$DisplayName timed out after $($Timeout.TotalMinutes) minutes."
+                      }
+
+                      if ($process.ExitCode -ne 0) {
+                          throw "$DisplayName failed with exit code $($process.ExitCode)."
+                      }
+                  }
+
+                  $paths = @(Get-TestPaths -RawPaths $env:TEST_PATHS | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                  if ($paths.Count -eq 0) {
+                      throw 'No test paths were provided.'
+                  }
+
+                  $pathTimeout = [TimeSpan]::FromMinutes([int] $env:TEST_PATH_TIMEOUT_MINUTES)
+                  $usesMicrosoftTestingPlatform = Test-UsesMicrosoftTestingPlatform
+                  $runnerName = if ($usesMicrosoftTestingPlatform) { 'Microsoft.Testing.Platform' } else { 'VSTest' }
+                  Write-Host "Detected test runner: $runnerName"
+                  Write-Host "Per-path timeout: $($pathTimeout.TotalMinutes) minutes"
+
+                  New-Item -ItemType Directory -Force -Path $env:TEST_RESULTS_DIR | Out-Null
+
+                  for ($index = 0; $index -lt $paths.Count; $index++) {
+                      $path = $paths[$index]
+                      if (-not (Test-Path -LiteralPath $path)) {
+                          throw "Test path not found: $path"
+                      }
+
+                      $safePath = ($path -replace '[\\/:*?"<>|\s]+', '_').Trim('_')
+                      if (-not $safePath) {
+                          $safePath = "path-$($index + 1)"
+                      }
+
+                      $resultDirectory = Join-Path $env:TEST_RESULTS_DIR ('{0:D2}-{1}' -f ($index + 1), $safePath)
+                      New-Item -ItemType Directory -Force -Path $resultDirectory | Out-Null
+
+                      Write-Host "::group::Test path $($index + 1)/$($paths.Count): $path"
+                      try {
+                          if ($usesMicrosoftTestingPlatform) {
+                              $arguments = @(
+                                  'test', $path,
+                                  '--configuration', $env:TEST_CONFIGURATION,
+                                  '--verbosity', 'minimal',
+                                  '--results-directory', $resultDirectory,
+                                  '--',
+                                  '--report-trx',
+                                  '--report-trx-filename', 'TestResults.trx',
+                                  '--timeout', "$($env:TEST_PATH_TIMEOUT_MINUTES)m",
+                                  '--long-running', $env:TEST_LONG_RUNNING_SECONDS,
+                                  '--stop-on-fail', 'on'
+                              )
+                          }
+                          else {
+                              $arguments = @(
+                                  'test', $path,
+                                  '--configuration', $env:TEST_CONFIGURATION,
+                                  '--verbosity', 'minimal',
+                                  '--results-directory', $resultDirectory,
+                                  '--logger', 'trx',
+                                  '--blame-hang',
+                                  '--blame-hang-dump-type', 'none',
+                                  '--blame-hang-timeout', "$($env:TEST_PATH_TIMEOUT_MINUTES)m"
+                              )
+                          }
+
+                          Invoke-ProcessWithTimeout -FilePath 'dotnet' -Arguments $arguments -Timeout $pathTimeout -DisplayName "Test path '$path'"
+                      }
+                      finally {
+                          Write-Host "::endgroup::"
+                      }
+                  }
+
+            - name: Publish test results
+              uses: Eternet/publish-unit-test-result-action/windows@v2
+              if: always()
+              with:
+                  files: "**/TestResults/**/*.trx"
+                  check_name: Test Results
+                  job_summary: true
+
+            - name: Upload test result artifacts
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: TestResults
+                  path: "**/TestResults/**/*.trx"
+                  if-no-files-found: warn
+                  retention-days: 7
