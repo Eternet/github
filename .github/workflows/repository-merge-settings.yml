@@ -28,7 +28,7 @@ jobs:
       - run: node --test scripts/reconcile-merge-settings.test.mjs
 
   reconcile:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'Eternet/github'
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 10

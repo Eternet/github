@@ -47,6 +47,8 @@ tokens ni claves privadas al código ni imprimirlos en logs.
 Luego, ejecutar **Actions → Reconcile repository merge settings → Run workflow**
 con `dry_run=true` para inspeccionar el resumen. Para aplicar en una ejecución
 manual, desmarcar `dry_run`. Las ejecuciones programadas aplican los cambios.
+La aplicación de ajustes está habilitada solo desde `main` de `Eternet/github`;
+las ejecuciones en PRs y otras ramas solo corren las pruebas.
 
 La programación usa los minutos 7, 22, 37 y 52 de cada hora para evitar el inicio
 de hora. GitHub puede demorar una ejecución programada; no es un disparador
