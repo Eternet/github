@@ -1,0 +1,70 @@
+name: Reconcile repository merge settings
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Preview without changing repository settings
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - '.github/workflows/repository-merge-settings.yml'
+      - 'scripts/reconcile-merge-settings.mjs'
+      - 'scripts/reconcile-merge-settings.test.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: node --test scripts/reconcile-merge-settings.test.mjs
+
+  reconcile:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'Eternet/github'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: eternet-repository-merge-settings
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select organization credential
+        id: credential
+        env:
+          APP_ID: ${{ vars.REPOSITORY_SETTINGS_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.REPOSITORY_SETTINGS_APP_PRIVATE_KEY }}
+          SETTINGS_TOKEN: ${{ secrets.REPOSITORY_SETTINGS_TOKEN }}
+        run: |
+          if [[ -n "$APP_ID" && -n "$APP_PRIVATE_KEY" ]]; then
+            echo 'app=true' >> "$GITHUB_OUTPUT"
+          elif [[ -n "$SETTINGS_TOKEN" ]]; then
+            echo 'app=false' >> "$GITHUB_OUTPUT"
+          else
+            echo '::error::Configure an Eternet GitHub App or REPOSITORY_SETTINGS_TOKEN with Administration: write and access to all Eternet repositories.'
+            exit 1
+          fi
+      - name: Create short-lived organization token
+        if: steps.credential.outputs.app == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.REPOSITORY_SETTINGS_APP_ID }}
+          private-key: ${{ secrets.REPOSITORY_SETTINGS_APP_PRIVATE_KEY }}
+          owner: Eternet
+          permission-administration: write
+      - name: Reconcile and verify settings
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.REPOSITORY_SETTINGS_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        run: node scripts/reconcile-merge-settings.mjs
