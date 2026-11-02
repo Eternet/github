@@ -301,6 +301,16 @@ def matrix_rows(job):
     return rows
 
 
+def string_partition(variable, parsed_expressions):
+    values = [value for expr in parsed_expressions for value in expr.comparison_values(variable)]
+    if not values:
+        raise PolicyError(f'{variable} has no verified literal string equality partition')
+    sentinel = '__runner_policy_other__'
+    while sentinel.lower() in {value.lower() for value in values}:
+        sentinel += '_'
+    return values + ['', sentinel]
+
+
 def contexts(workflow, job, selector):
     parsed_expressions = expressions(selector)
     variables = set().union(*(expr.variables() for expr in parsed_expressions))
@@ -324,29 +334,37 @@ def contexts(workflow, job, selector):
                 raise PolicyError('event-dependent reusable selector has no verified caller event domain')
             domains[variable] = event_names
             continue
+        if variable.startswith('vars.'):
+            if not re.fullmatch(r'vars\.[A-Za-z_][A-Za-z_0-9]*', variable):
+                raise PolicyError(f'unverified configuration variable property {variable}')
+            # GitHub configuration variables are strings (unset is empty).
+            # Every use must still be a literal equality; the value can never
+            # escape into a selector, JSON, or free interpolation.
+            domains[variable] = string_partition(variable, parsed_expressions)
+            continue
         if not variable.startswith('inputs.'):
             raise PolicyError(f'unverified expression variable {variable}')
         name = variable[len('inputs.'):]
         # workflow_call string inputs are not bounded by dispatch choices.
         call = (events.get('workflow_call') or {}).get('inputs', {}).get(name)
-        definition = (events.get('workflow_dispatch') or {}).get('inputs', {}).get(name) or call
-        if not isinstance(definition, dict):
+        dispatch = (events.get('workflow_dispatch') or {}).get('inputs', {}).get(name)
+        definitions = [definition for definition in (dispatch, call) if definition is not None]
+        if not definitions or any(not isinstance(definition, dict) for definition in definitions):
             raise PolicyError(f'input {name} has no verified finite definition')
-        declared_type = (call or definition).get('type', 'string')
-        if declared_type not in ('string', 'choice', 'boolean'):
-            raise PolicyError(f'input {name} type {declared_type!r} has no verified finite domain')
-        if not call and definition.get('type') == 'choice' and isinstance(definition.get('options'), list) and definition['options']:
-            values = list(definition['options'])
-        elif definition.get('type') == 'boolean':
+        declared_types = {definition.get('type', 'string') for definition in definitions}
+        unsupported = declared_types - {'string', 'choice', 'boolean'}
+        if unsupported:
+            raise PolicyError(f'input {name} type {sorted(unsupported)[0]!r} has no verified finite domain')
+        if 'boolean' in declared_types and declared_types != {'boolean'}:
+            raise PolicyError(f'input {name} has incompatible dispatch/call types; no shared finite domain')
+        if declared_types == {'boolean'}:
             values = [False, True]
+        elif call is None and dispatch.get('type') == 'choice':
+            values = dispatch.get('options')
+            if not isinstance(values, list) or not values or any(not isinstance(value, str) for value in values):
+                raise PolicyError(f'input {name} choices must be nonempty literal strings')
         else:
-            values = [value for expr in parsed_expressions for value in expr.comparison_values(variable)]
-            if not values:
-                raise PolicyError(f'input {name} is not a finite choice or boolean')
-            sentinel = '__runner_policy_other__'
-            while sentinel.lower() in {value.lower() for value in values}:
-                sentinel += '_'
-            values.extend(['', sentinel])
+            values = string_partition(variable, parsed_expressions)
         if any(event != 'workflow_dispatch' for event in event_names):
             values.append('')
         domains[variable] = values
