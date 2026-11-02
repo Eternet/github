@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -30,7 +30,7 @@ jobs:
   reconcile:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'Eternet/github'
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     timeout-minutes: 10
     concurrency:
       group: eternet-repository-merge-settings
