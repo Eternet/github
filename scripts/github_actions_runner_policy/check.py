@@ -9,7 +9,10 @@ import json
 import math
 from pathlib import Path
 import re
+import subprocess
 import sys
+import tempfile
+from typing import NamedTuple
 
 import yaml
 
@@ -463,9 +466,9 @@ class Auditor:
             raise PolicyError(f'remote reusable snapshot digest mismatch: {reference}')
         self.workflow(snapshot['content'], reference, stack)
 
-    def run(self):
+    def run(self, allow_empty=False):
         paths = sorted((self.root / '.github' / 'workflows').glob('*.y*ml'))
-        if not paths:
+        if not paths and not allow_empty:
             self.errors.append('no workflows found')
         for path in paths:
             try:
@@ -475,18 +478,130 @@ class Auditor:
         return self.errors
 
 
+OBJECT_ID = re.compile(r'^[a-f0-9]{40}(?:[a-f0-9]{24})?$', re.I)
+MAX_WORKFLOW_FILES = 512
+MAX_WORKFLOW_BYTES = 2 * 1024 * 1024
+MAX_TREE_BYTES = 32 * 1024 * 1024
+
+
+def git_output(root, *arguments):
+    try:
+        process = subprocess.run(
+            ['git', '--no-replace-objects', '-C', str(root), *arguments], capture_output=True, check=False)
+    except OSError as exc:
+        raise PolicyError(f'Git is unavailable: {exc}') from exc
+    if process.returncode:
+        error = process.stderr.decode('utf-8', errors='replace').strip()
+        raise PolicyError(f'git {arguments[0]} failed: {error}')
+    return process.stdout
+
+
+def resolve_object(root, reference, kind='object'):
+    if not isinstance(reference, str) or not reference or '\x00' in reference:
+        raise PolicyError('Git reference must be a nonempty literal')
+    value = git_output(root, 'rev-parse', '--verify', '--end-of-options', f'{reference}^{{{kind}}}')
+    object_id = value.decode('ascii').strip()
+    if not OBJECT_ID.fullmatch(object_id):
+        raise PolicyError('Git did not resolve the reference to one exact object')
+    return object_id.lower()
+
+
+class GitAuditResult(NamedTuple):
+    commit: str
+    errors: tuple[str, ...]
+    workflows: int
+    jobs: int
+
+
+def audit_git_ref(root, reference, reusables=None):
+    """Audit immutable blobs, including local reusables, without checking out code."""
+    root = Path(root).resolve()
+    commit = resolve_object(root, reference, 'commit')
+    tree = git_output(root, 'ls-tree', '-rz', '--full-tree', commit, '--', '.github/workflows')
+    records = [record for record in tree.split(b'\x00') if record]
+    if not records:
+        return GitAuditResult(commit, (), 0, 0)
+    if len(records) > MAX_WORKFLOW_FILES:
+        raise PolicyError('committed workflow tree exceeds bounded file limit')
+    with tempfile.TemporaryDirectory(prefix='eternet-runner-policy-') as directory:
+        snapshot = Path(directory).resolve()
+        seen_paths = set()
+        total = 0
+        for record in records:
+            try:
+                metadata, raw_name = record.split(b'\t', 1)
+                mode, object_type, object_id = metadata.decode('ascii').split()
+                name = raw_name.decode('utf-8')
+            except (ValueError, UnicodeError) as exc:
+                raise PolicyError('invalid committed workflow tree entry') from exc
+            if mode not in ('100644', '100755') or object_type != 'blob':
+                raise PolicyError(f'workflow tree contains unsupported non-regular file: {name}')
+            if not OBJECT_ID.fullmatch(object_id):
+                raise PolicyError('workflow tree contains an invalid blob object')
+            if not name.startswith('.github/workflows/') or '\\' in name or any(
+                    part in ('', '.', '..') for part in name.split('/')):
+                raise PolicyError(f'workflow tree contains an unsupported path: {name}')
+            parts = name.split('/')
+            if any(part.endswith((' ', '.')) or re.search(r'[<>:"|?*\x00-\x1f]', part) or
+                   re.match(r'^(?:con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(?:\.|$)', part, re.I)
+                   for part in parts):
+                raise PolicyError(f'workflow tree contains a nonportable filesystem path: {name}')
+            collision_key = name.casefold()
+            if collision_key in seen_paths:
+                raise PolicyError(f'workflow snapshot path collision: {name}')
+            seen_paths.add(collision_key)
+            destination = snapshot / name
+            if not destination.resolve().is_relative_to(snapshot):
+                raise PolicyError('workflow snapshot path escapes temporary root')
+            if destination.exists():
+                raise PolicyError(f'workflow snapshot path collision: {name}')
+            raw_size = git_output(root, 'cat-file', '-s', object_id)
+            try:
+                size = int(raw_size)
+            except ValueError as exc:
+                raise PolicyError('Git returned an invalid workflow blob size') from exc
+            total += size
+            if size < 0 or size > MAX_WORKFLOW_BYTES or total > MAX_TREE_BYTES:
+                raise PolicyError('committed workflow data exceeds bounded byte limit')
+            content = git_output(root, 'cat-file', 'blob', object_id)
+            if len(content) != size:
+                raise PolicyError(f'workflow blob size changed unexpectedly: {name}')
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content)
+        auditor = Auditor(snapshot, reusables)
+        errors = auditor.run(allow_empty=True)
+        return GitAuditResult(commit, tuple(errors), len(auditor.visited), auditor.jobs)
+
+
+def approved_reusables():
+    manifest = Path(__file__).with_name('approved_reusables.json')
+    return json.loads(manifest.read_text(encoding='utf-8'))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path.cwd())
+    parser.add_argument('--git-ref', help='Audit this exact committed tree, ignoring editor/index contents.')
     args = parser.parse_args()
-    manifest = Path(__file__).with_name('approved_reusables.json')
-    auditor = Auditor(args.root, json.loads(manifest.read_text(encoding='utf-8')))
-    for error in auditor.run():
-        print(f'ERROR: {error}', file=sys.stderr)
-    if auditor.errors:
-        print(f'Runner policy failed with {len(auditor.errors)} violation(s).', file=sys.stderr)
+    try:
+        if args.git_ref is not None:
+            result = audit_git_ref(args.root, args.git_ref, approved_reusables())
+            errors, workflows, jobs = result.errors, result.workflows, result.jobs
+            revision = f' for commit {result.commit}'
+        else:
+            auditor = Auditor(args.root, approved_reusables())
+            errors = auditor.run()
+            workflows, jobs = len(auditor.visited), auditor.jobs
+            revision = ' for working tree'
+    except (PolicyError, OSError, UnicodeError, ValueError) as exc:
+        print(f'ERROR: {exc}', file=sys.stderr)
         return 1
-    print(f'Runner policy passed: {len(auditor.visited)} workflows, {auditor.jobs} jobs; only verified Eternet selectors.')
+    for error in errors:
+        print(f'ERROR: {error}', file=sys.stderr)
+    if errors:
+        print(f'Runner policy failed{revision} with {len(errors)} violation(s).', file=sys.stderr)
+        return 1
+    print(f'Runner policy passed{revision}: {workflows} workflows, {jobs} jobs; only verified Eternet selectors.')
     return 0
 
 

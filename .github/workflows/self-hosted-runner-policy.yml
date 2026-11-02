@@ -1,21 +1,37 @@
+# The only policy workflow: maintained centrally, never copied into consumers.
 name: Self-hosted runner policy
 
 on:
   pull_request:
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "scripts/github_actions_runner_policy/**"
   push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - "scripts/github_actions_runner_policy/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: runner-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   runner-policy:
     runs-on: [self-hosted, Linux]
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./scripts/github_actions_runner_policy
-      - name: Verify policy regression cases
+      - name: Verify policy and trigger regression cases
         shell: bash
         run: |
           set -euo pipefail
@@ -24,3 +40,4 @@ jobs:
           python -m venv "$policy_venv"
           "$policy_venv/bin/python" -m pip install --disable-pip-version-check --only-binary=:all: PyYAML==6.0.3
           "$policy_venv/bin/python" -m unittest discover -s scripts/github_actions_runner_policy -p 'test_*.py' -v
+          "$policy_venv/bin/python" -m unittest discover -s .github/actions/verify-dotnet-readiness/tests -p 'test_*.py' -v

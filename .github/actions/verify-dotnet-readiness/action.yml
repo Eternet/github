@@ -1,0 +1,37 @@
+name: Verify provisioned .NET SDKs
+description: Check centrally installed SDKs and source SDK resolution without installing or changing tools.
+inputs:
+  dotnet-version:
+    description: SDK versions to require, one per line, as in setup-dotnet.
+    required: false
+    default: ''
+  global-json-file:
+    description: Source global.json whose SDK resolution must succeed.
+    required: false
+    default: ''
+  working-directory:
+    description: Checkout directory, relative to github.workspace unless absolute.
+    required: false
+    default: '.'
+outputs:
+  dotnet-version:
+    description: Actual SDK selected by the source checkout.
+    value: ${{ steps.readiness.outputs.dotnet-version }}
+runs:
+  using: composite
+  steps:
+    - name: Verify centrally provisioned SDK readiness
+      id: readiness
+      shell: pwsh
+      env:
+        READINESS_ACTION_PATH: ${{ github.action_path }}
+        READINESS_WORKSPACE: ${{ github.workspace }}
+        READINESS_DOTNET_VERSIONS: ${{ inputs.dotnet-version }}
+        READINESS_GLOBAL_JSON: ${{ inputs.global-json-file }}
+        READINESS_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        & (Join-Path $env:READINESS_ACTION_PATH 'Assert-DotnetReadiness.ps1') `
+          -DotnetVersion $env:READINESS_DOTNET_VERSIONS `
+          -GlobalJsonFile $env:READINESS_GLOBAL_JSON `
+          -WorkingDirectory $env:READINESS_WORKING_DIRECTORY `
+          -Workspace $env:READINESS_WORKSPACE
