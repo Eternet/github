@@ -3,11 +3,11 @@
 Este control rechaza selectores hospedados por GitHub y selectores cuya
 procedencia no puede probar estáticamente. No despacha workflows ni modifica
 runners, DB, IIS o servicios. El control de CI detecta cambios; **no bloquea por
-sí solo que otro job hospedado arranque en paralelo**. La prevención a nivel de
-organización requiere deshabilitar los runners estándar hospedados para todos
-los repositorios. El permiso de la identidad disponible respondió HTTP 403;
-esa configuración continúa pendiente de un propietario con acceso a Actions
-policies, bajo seguimiento en [Servidores #559](https://github.com/Eternet/Servidores/issues/559).
+sí solo que otro job hospedado arranque en paralelo**. La prevención local se
+aplica antes del push sobre el árbol Git real, junto con las reglas compartidas
+de los asistentes. No se aplica un bloqueo global de Actions ni se modifican
+grupos o runners operativos. Seguimiento en
+[Servidores #559](https://github.com/Eternet/Servidores/issues/559).
 
 ## Uso
 
@@ -64,31 +64,25 @@ malformadas e historia no disponible. Omite eliminaciones y acepta un push sin
 actualizaciones. Varios refs al mismo commit comparten la auditoría, pero todos
 los refs y objetos se comprueban. La URL del remote no se imprime.
 
-Este cambio entrega el helper y **no instala ni reemplaza hooks**. La instalación
-debe revisar `core.hooksPath` y conservar/encadenar cualquier hook preexistente.
+La instalación debe revisar `core.hooksPath` y conservar/encadenar cualquier hook preexistente.
 Un hook local protege los pushes que pasan por él; no controla otros equipos,
-la edición web o llamadas a la API. Mantener la prohibición de runners estándar
-en la organización como barrera independiente.
+la edición web o llamadas a la API. Esas vías exigen igualmente la auditoría
+previa del árbol fuente en las instrucciones compartidas de los asistentes.
 
-Los consumidores usan la misma acción compuesta, sin copiar el validador.
-Después de integrar el cambio de infraestructura, reemplazar `COMMIT_INTEGRADO`
-por un SHA completo alcanzable desde la rama principal de Eternet/github:
+## Un solo workflow de control
 
-```yaml
-jobs:
-  runner-policy:
-    runs-on: [self-hosted, Linux]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: Eternet/github/scripts/github_actions_runner_policy@COMMIT_INTEGRADO
-```
+Los consumidores no agregan un archivo YAML ni un job de política nuevo. El
+único `self-hosted-runner-policy.yml` se mantiene en Eternet/github para probar
+el propio control y sus fixtures. Se usa el hook local y la CLI anterior, sin
+copiar checker, pruebas o plantillas. No se distribuye un renderer a proyectos.
 
-La acción requiere un runner Linux propio con bash y los prerrequisitos de
+La acción del self-check requiere Linux propio con bash y los prerrequisitos de
 `actions/setup-python`. Instala PyYAML en un entorno virtual temporal y lo elimina
 al finalizar; no instala paquetes globales. La acción vive en Eternet/github, un repositorio público, para permitir el uso
 desde los repositorios de la organización sin compartir acciones privadas.
 El workflow `self-hosted-runner-policy.yml` comprueba el propio Eternet/github en
-push/PR. La interfaz compartida entre repositorios es la acción compuesta.
+push/PR. El diseño y la lectura de checks obligatorios están en
+[CONTROL_DESIGN.md](CONTROL_DESIGN.md).
 La acción audita `HEAD` del checkout comprometido mediante `--git-ref HEAD`.
 
 ## Procedencia admitida
@@ -125,7 +119,9 @@ desconocidos y expansiones mayores a 4096 combinaciones. Las matrices dinámicas
 se rechazan cuando `runs-on` lee `matrix.*`; si el selector no depende de la
 matriz, todas sus filas conservan el mismo runner ya comprobado.
 La captura Git limita el árbol a 512 archivos, 2 MiB por blob y 32 MiB totales;
-rechaza symlinks y entradas que no sean archivos regulares. El hook limita la
+rechaza symlinks y entradas que no sean archivos regulares. Antes de escribir
+rechaza colisiones de mayúsculas y aliases/dispositivos de Windows para que un
+blob no oculte otro al capturarse en un filesystem distinto. El hook limita la
 entrada a 512 actualizaciones y 1 MiB. Sobrepasar esos límites falla de forma
 cerrada, sin omitir archivos o refs.
 Cuando una entrada existe en dispatch y workflow_call, se verifican ambas

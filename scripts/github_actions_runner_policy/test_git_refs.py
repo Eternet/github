@@ -50,6 +50,32 @@ class GitFixture(unittest.TestCase):
 
 
 class CommittedRunnerTreeTests(GitFixture):
+    def commit_raw_paths(self, files):
+        # Construct Git's case-sensitive tree directly, including names that
+        # cannot coexist in an ordinary Windows working directory.
+        self.git('config', 'core.ignorecase', 'false')
+        self.git('config', 'core.protectNTFS', 'false')
+        self.git('read-tree', '--empty')
+        for name, content in files.items():
+            blob = self.git('hash-object', '-w', '--stdin', input=content)
+            self.git('update-index', '--add', '--cacheinfo', f'100644,{blob},{name}')
+        tree = self.git('write-tree')
+        return self.git('commit-tree', tree, '-m', 'Synthetic raw workflow paths')
+
+    def test_case_colliding_git_paths_cannot_hide_hosted_blob_in_windows_snapshot(self):
+        commit = self.commit_raw_paths({'.github/workflows/Build.yml': HOSTED,
+                                        '.github/workflows/build.yml': SAFE})
+        self.assertEqual(2, len(self.git('ls-tree', '-r', '--name-only', commit).splitlines()))
+        with self.assertRaisesRegex(PolicyError, 'snapshot path collision'):
+            audit_git_ref(self.root, commit)
+
+    def test_windows_alias_and_device_paths_fail_before_snapshot_writes(self):
+        for name in ('build.yml.', 'build.yml ', 'build.yml::$DATA', 'NUL.yml', 'COM1.yml'):
+            with self.subTest(name=name):
+                commit = self.commit_raw_paths({'.github/workflows/' + name: HOSTED})
+                with self.assertRaisesRegex(PolicyError, 'nonportable filesystem path'):
+                    audit_git_ref(self.root, commit)
+
     def test_committed_head_rejects_hosted_workflow_hidden_by_safe_editor_changes(self):
         unsafe = self.commit_files({'.github/workflows/legacy.yml': HOSTED})
         self.write('.github/workflows/legacy.yml', SAFE)

@@ -525,6 +525,7 @@ def audit_git_ref(root, reference, reusables=None):
         raise PolicyError('committed workflow tree exceeds bounded file limit')
     with tempfile.TemporaryDirectory(prefix='eternet-runner-policy-') as directory:
         snapshot = Path(directory).resolve()
+        seen_paths = set()
         total = 0
         for record in records:
             try:
@@ -540,9 +541,20 @@ def audit_git_ref(root, reference, reusables=None):
             if not name.startswith('.github/workflows/') or '\\' in name or any(
                     part in ('', '.', '..') for part in name.split('/')):
                 raise PolicyError(f'workflow tree contains an unsupported path: {name}')
+            parts = name.split('/')
+            if any(part.endswith((' ', '.')) or re.search(r'[<>:"|?*\x00-\x1f]', part) or
+                   re.match(r'^(?:con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(?:\.|$)', part, re.I)
+                   for part in parts):
+                raise PolicyError(f'workflow tree contains a nonportable filesystem path: {name}')
+            collision_key = name.casefold()
+            if collision_key in seen_paths:
+                raise PolicyError(f'workflow snapshot path collision: {name}')
+            seen_paths.add(collision_key)
             destination = snapshot / name
             if not destination.resolve().is_relative_to(snapshot):
                 raise PolicyError('workflow snapshot path escapes temporary root')
+            if destination.exists():
+                raise PolicyError(f'workflow snapshot path collision: {name}')
             raw_size = git_output(root, 'cat-file', '-s', object_id)
             try:
                 size = int(raw_size)
