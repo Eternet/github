@@ -185,6 +185,62 @@ jobs:
         errors = self.audit(content)
         self.assertTrue(any("type 'number'" in error for error in errors), errors)
 
+    def test_conflicting_dispatch_and_call_types_cannot_hide_string_hosted_branch(self):
+        for dispatch_type, call_type in (('boolean', 'string'), ('string', 'boolean')):
+            with self.subTest(dispatch_type=dispatch_type, call_type=call_type):
+                content = f'''on:
+  workflow_dispatch:
+    inputs:
+      target: {{type: {dispatch_type}}}
+  workflow_call:
+    inputs:
+      target: {{type: {call_type}}}
+jobs:
+  check:
+    runs-on: ${{{{ inputs.target == 'ubuntu-latest' && 'ubuntu-latest' || 'self-hosted' }}}}
+'''
+                errors = self.audit(content)
+                self.assertTrue(any('incompatible dispatch/call types' in error for error in errors), errors)
+
+    def test_call_string_domain_is_not_narrowed_to_dispatch_choices(self):
+        content = '''on:
+  workflow_dispatch:
+    inputs:
+      target: {type: choice, options: [self-hosted]}
+  workflow_call:
+    inputs:
+      target: {type: string}
+jobs:
+  check:
+    runs-on: ${{ inputs.target == 'ubuntu-latest' && 'ubuntu-latest' || 'self-hosted' }}
+'''
+        errors = self.audit(content)
+        self.assertTrue(any('GitHub-hosted' in error for error in errors), errors)
+        safe = content.replace("inputs.target == 'ubuntu-latest' && 'ubuntu-latest'", "inputs.target == 'mini-pc-perf' && 'mini-pc-perf'")
+        self.assertEqual([], self.audit(safe))
+
+    def test_configuration_variable_literal_equality_map_proves_every_string_partition(self):
+        selector = '''[self-hosted, Windows, "${{ vars.MOBILE_CI_RUNNER_LABEL == 'Runner1' && 'Runner1' || vars.MOBILE_CI_RUNNER_LABEL == 'Runner2' && 'Runner2' || vars.MOBILE_CI_RUNNER_LABEL == 'Runner3' && 'Runner3' || vars.MOBILE_CI_RUNNER_LABEL == 'Runner6' && 'Runner6' || vars.MOBILE_CI_RUNNER_LABEL == 'Runner7' && 'Runner7' || 'Windows' }}"]'''
+        self.assertEqual([], self.audit(self.workflow(selector)))
+
+    def test_configuration_variable_hosted_branch_is_checked_for_equality_and_inequality(self):
+        for comparison in ("vars.RUNNER == 'ubuntu-latest'", "vars.RUNNER != 'self-hosted'"):
+            with self.subTest(comparison=comparison):
+                errors = self.audit(self.workflow('${{ ' + comparison + " && 'ubuntu-latest' || 'self-hosted' }}"))
+                self.assertTrue(any('GitHub-hosted' in error for error in errors), errors)
+
+    def test_configuration_variable_cannot_escape_into_output_json_or_interpolation(self):
+        for expression in ('vars.RUNNER', "fromJSON(vars.RUNNER)", "format('{0}', vars.RUNNER)",
+                           "vars.RUNNER == 'known' && vars.RUNNER || 'self-hosted'"):
+            with self.subTest(expression=expression):
+                errors = self.audit(self.workflow("[self-hosted, \"${{ " + expression + " }}\"]"))
+                self.assertTrue(any('escapes literal equality' in error for error in errors), errors)
+
+    def test_nested_configuration_variable_property_is_not_assumed_string(self):
+        selector = "${{ vars.RUNNER.child == '' && vars.RUNNER.child == '0' && 'ubuntu-latest' || 'self-hosted' }}"
+        errors = self.audit(self.workflow(selector))
+        self.assertTrue(any('unverified configuration variable property' in error for error in errors), errors)
+
     def test_format_null_coercion_fails_closed_instead_of_using_python_none(self):
         errors = self.audit(self.workflow("${{ format('{0}', null) == '' && 'ubuntu-latest' || 'self-hosted' }}"))
         self.assertTrue(any('format arguments must be strings' in error for error in errors), errors)

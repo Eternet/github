@@ -71,6 +71,12 @@ como etiqueta, interpolación libre o JSON. Se rechazan contextos y sintaxis
 desconocidos y expansiones mayores a 4096 combinaciones. Las matrices dinámicas
 se rechazan cuando `runs-on` lee `matrix.*`; si el selector no depende de la
 matriz, todas sus filas conservan el mismo runner ya comprobado.
+Cuando una entrada existe en dispatch y workflow_call, se verifican ambas
+declaraciones: tipos incompatibles se rechazan y una entrada string del caller
+no se limita a las choices de dispatch. Las variables `vars.*` son strings y
+solo se admiten en comparaciones de igualdad/desigualdad con literales: se
+prueban todos los literales, el valor vacío y el resto. Nunca se devuelve la
+variable como etiqueta ni se inserta libremente en texto o JSON.
 Las entradas numéricas se rechazan: no se aproximan con valores string.
 Los reutilizables que usan `github.event_name` en el selector se rechazan porque
 ese contexto pertenece al caller. `format` y `contains` escalar requieren
