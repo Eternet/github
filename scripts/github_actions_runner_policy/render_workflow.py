@@ -10,7 +10,6 @@ import sys
 
 WORKFLOW_PATH = '.github/workflows/self-hosted-runner-policy.yml'
 ACTION = 'Eternet/github/scripts/github_actions_runner_policy'
-CONFIGS = ('.github/actionlint.yaml', '.github/actionlint.yml', '.actionlint.yaml', '.actionlint.yml')
 
 
 def render(root: Path, default_branch: str, policy_ref: str | None, central: bool = False) -> str:
@@ -19,7 +18,6 @@ def render(root: Path, default_branch: str, policy_ref: str | None, central: boo
     if not central and not re.fullmatch(r'[a-f0-9]{40}', policy_ref or ''):
         raise ValueError('Use an integrated immutable 40-character policy commit.')
     paths = ['.github/workflows/**', '.github/actions/**']
-    paths.extend(path for path in CONFIGS if (root / path).is_file())
     if central:
         paths.append('scripts/github_actions_runner_policy/**')
     filters = '\n'.join('      - ' + json.dumps(path) for path in paths)

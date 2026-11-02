@@ -3,8 +3,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from check import load_yaml
-from render_workflow import CONFIGS, render
+from check import Auditor, load_yaml
+from render_workflow import render
 
 PIN = '09abf9b1a413ea8f0e079350a98788c5f103c8cd'
 
@@ -27,26 +27,44 @@ class WorkflowTriggerTests(unittest.TestCase):
                 with self.subTest(event=event, path=path):
                     self.assertFalse(triggered(workflow, event, path))
 
-    def test_workflow_action_and_existing_control_config_trigger_pr_and_default_push(self):
+    def test_workflow_and_action_trigger_pr_and_default_push(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            config = root / '.github/actionlint.yaml'
-            config.parent.mkdir()
-            config.write_text('self-hosted-runner: {}\n')
             workflow = load_yaml(render(root, 'master', PIN))
         self.assertEqual(workflow['on']['pull_request']['paths'], workflow['on']['push']['paths'])
         self.assertEqual(['master'], workflow['on']['push']['branches'])
         for event in ('pull_request', 'push'):
-            for path in ('.github/workflows/unrelated.yml', '.github/actions/nested/action.yml', '.github/actionlint.yaml'):
+            for path in ('.github/workflows/unrelated.yml', '.github/actions/nested/action.yml'):
                 with self.subTest(event=event, path=path):
                     self.assertTrue(triggered(workflow, event, path, 'master'))
         self.assertFalse(triggered(workflow, 'push', '.github/workflows/a.yml', 'feature'))
 
-    def test_only_existing_control_configs_are_added_and_manual_dispatch_remains(self):
+    def test_unread_configs_do_not_trigger_and_manual_dispatch_remains(self):
         with tempfile.TemporaryDirectory() as directory:
-            workflow = load_yaml(render(Path(directory), 'main', PIN))
+            root = Path(directory)
+            (root / '.github').mkdir()
+            (root / '.github/actionlint.yaml').write_text('self-hosted-runner: {}\n')
+            workflow = load_yaml(render(root, 'main', PIN))
         self.assertTrue(triggered(workflow, 'workflow_dispatch', 'src/Program.cs'))
-        self.assertFalse(set(CONFIGS) & set(workflow['on']['pull_request']['paths']))
+        for event in ('pull_request', 'push'):
+            for path in ('.github/actionlint.yaml', '.github/generated-matrix.json', 'matrix.json'):
+                self.assertFalse(triggered(workflow, event, path), (event, path))
+
+    def test_local_reusable_and_its_inline_matrix_are_audited_and_trigger_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflows = root / '.github/workflows'
+            workflows.mkdir(parents=True)
+            (workflows / 'caller.yml').write_text('on: push\njobs:\n  invoke:\n    uses: ./.github/workflows/reusable.yml\n')
+            child = workflows / 'reusable.yml'
+            safe = "on: workflow_call\njobs:\n  check:\n    runs-on: ${{ matrix.runner }}\n    strategy:\n      matrix:\n        runner: [self-hosted]\n"
+            child.write_text(safe)
+            self.assertEqual([], Auditor(root).run())
+            child.write_text(safe.replace('[self-hosted]', '[self-hosted, ubuntu-latest]'))
+            self.assertTrue(any('GitHub-hosted' in error for error in Auditor(root).run()))
+            workflow = load_yaml(render(root, 'main', PIN))
+            for event in ('pull_request', 'push'):
+                self.assertTrue(triggered(workflow, event, '.github/workflows/reusable.yml'))
 
     def test_actual_central_workflow_matches_template_and_tests_its_own_changes(self):
         root = Path(__file__).resolve().parents[2]
@@ -55,6 +73,7 @@ class WorkflowTriggerTests(unittest.TestCase):
         workflow = load_yaml(actual)
         for event in ('pull_request', 'push'):
             self.assertTrue(triggered(workflow, event, 'scripts/github_actions_runner_policy/check.py'))
+            self.assertTrue(triggered(workflow, event, 'scripts/github_actions_runner_policy/approved_reusables.json'))
             self.assertTrue(triggered(workflow, event, '.github/actions/verify-dotnet-readiness/action.yml'))
             self.assertFalse(triggered(workflow, event, 'files/.editorconfig'))
             self.assertFalse(triggered(workflow, event, 'docs/README.md'))
