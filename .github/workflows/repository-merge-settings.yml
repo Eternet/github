@@ -20,7 +20,19 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    if: >-
+      ${{
+        (
+          !contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name)
+          || github.event.pull_request.head.repo.full_name == github.repository
+          || (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true)
+        )
+        && (
+          github.event_name != 'workflow_run'
+          || github.event.workflow_run.head_repository.full_name == github.repository
+        )
+      }}
+    runs-on: [self-hosted, Linux]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -28,9 +40,21 @@ jobs:
       - run: node --test scripts/reconcile-merge-settings.test.mjs
 
   reconcile:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'Eternet/github'
+    if: >-
+      ${{
+        (github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'Eternet/github')
+        && (
+          !contains(fromJSON('["pull_request","pull_request_target"]'), github.event_name)
+          || github.event.pull_request.head.repo.full_name == github.repository
+          || (github.event_name == 'pull_request_target' && github.event.pull_request.merged == true)
+        )
+        && (
+          github.event_name != 'workflow_run'
+          || github.event.workflow_run.head_repository.full_name == github.repository
+        )
+      }}
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     timeout-minutes: 10
     concurrency:
       group: eternet-repository-merge-settings
