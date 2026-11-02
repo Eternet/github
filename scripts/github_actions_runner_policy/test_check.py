@@ -164,8 +164,44 @@ jobs:
 
     def test_github_truthiness_and_case_insensitive_loose_equality(self):
         self.assertEqual('ubuntu-latest', Expression("fromJSON('[]') && 'ubuntu-latest' || 'self-hosted'").evaluate({}))
-        self.assertEqual('ubuntu-latest', Expression("'0' == 0 && 'ubuntu-latest' || 'self-hosted'").evaluate({}))
         self.assertTrue(Expression("'SELF-HOSTED' == 'self-hosted'").evaluate({}))
+
+    def test_reusable_event_context_cannot_be_substituted_with_workflow_call(self):
+        main = 'on: push\njobs:\n  call:\n    uses: ./.github/workflows/child.yml\n'
+        child = self.workflow("${{ github.event_name == 'push' && 'ubuntu-latest' || 'self-hosted' }}")
+        child = child.replace('on: push', 'on: workflow_call')
+        errors = self.audit(main, {'child.yml': child})
+        self.assertTrue(any('caller event domain' in error for error in errors), errors)
+
+    def test_numeric_input_is_not_approximated_as_string_partition(self):
+        content = '''on:
+  workflow_dispatch:
+    inputs:
+      target: {type: number}
+jobs:
+  check:
+    runs-on: ${{ inputs.target == '' && inputs.target == '0' && 'ubuntu-latest' || 'self-hosted' }}
+'''
+        errors = self.audit(content)
+        self.assertTrue(any("type 'number'" in error for error in errors), errors)
+
+    def test_format_null_coercion_fails_closed_instead_of_using_python_none(self):
+        errors = self.audit(self.workflow("${{ format('{0}', null) == '' && 'ubuntu-latest' || 'self-hosted' }}"))
+        self.assertTrue(any('format arguments must be strings' in error for error in errors), errors)
+
+    def test_array_contains_uses_primitive_loose_equality(self):
+        errors = self.audit(self.workflow("${{ contains(fromJSON('[null]'), false) && 'ubuntu-latest' || 'self-hosted' }}"))
+        self.assertTrue(any('GitHub-hosted' in error for error in errors), errors)
+
+    def test_scalar_contains_nonstring_coercion_fails_closed(self):
+        errors = self.audit(self.workflow("${{ contains('', null) && 'ubuntu-latest' || 'self-hosted' }}"))
+        self.assertTrue(any('scalar contains arguments must be strings' in error for error in errors), errors)
+
+    def test_mixed_string_numeric_coercion_fails_closed(self):
+        for expression in ("'0' == 0", "contains(fromJSON('[null]'), ' ')"):
+            with self.subTest(expression=expression):
+                with self.assertRaisesRegex(PolicyError, 'unverified numeric coercion'):
+                    Expression(expression).evaluate({})
 
     def test_local_reusable_is_checked_and_cycles_fail(self):
         main = 'on: push\njobs:\n  call:\n    uses: ./.github/workflows/child.yml\n'

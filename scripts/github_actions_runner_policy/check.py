@@ -169,12 +169,16 @@ class Expression:
             if name == 'fromjson' and len(args) == 1:
                 return json.loads(args[0])
             if name == 'format' and args:
+                if any(not isinstance(arg, str) for arg in args):
+                    raise PolicyError('format arguments must be strings; primitive coercion is unverified')
                 return args[0].format(*args[1:])
             if name == 'contains' and len(args) == 2:
                 container, item = args
                 if isinstance(container, list):
-                    return any(gh_string(candidate).lower() == gh_string(item).lower() for candidate in container)
-                return gh_string(item).lower() in gh_string(container).lower()
+                    return any(equal_values(candidate, item) for candidate in container)
+                if not isinstance(container, str) or not isinstance(item, str):
+                    raise PolicyError('scalar contains arguments must be strings; primitive coercion is unverified')
+                return item.lower() in container.lower()
             raise PolicyError(f'unsupported arguments for {name}')
         try:
             return run(self.tree)
@@ -186,37 +190,21 @@ def truthy(value):
     return value is not None and value is not False and not (isinstance(value, (str, int, float)) and value in ('', 0))
 
 
-def gh_string(value):
-    if value is None:
-        return ''
-    if isinstance(value, bool):
-        return 'true' if value else 'false'
-    if isinstance(value, str):
-        return value
-    # Numeric formatting and complex object stringification are deliberately
-    # unsupported rather than approximated differently from the Actions engine.
-    raise PolicyError('unverified string coercion in contains')
-
-
 def equal_values(a, b):
     if isinstance(a, str) and isinstance(b, str):
         return a.lower() == b.lower()
     if type(a) is type(b):
         # Arrays/objects compare by instance in GitHub expressions.
         return a is b if isinstance(a, (list, dict)) else a == b
+    if isinstance(a, str) or isinstance(b, str):
+        raise PolicyError('mixed string/primitive equality requires unverified numeric coercion')
     def number(value):
-        if value is None or value == '':
+        if value is None:
             return 0
         if isinstance(value, bool):
             return int(value)
         if isinstance(value, (int, float)):
             return value
-        if isinstance(value, str):
-            try:
-                parsed = json.loads(value)
-                return parsed if type(parsed) in (int, float) else math.nan
-            except ValueError:
-                pass
         return math.nan
     return number(a) == number(b)
 
@@ -332,6 +320,8 @@ def contexts(workflow, job, selector):
         if variable.startswith('matrix.'):
             continue
         if variable == 'github.event_name':
+            if 'workflow_call' in events:
+                raise PolicyError('event-dependent reusable selector has no verified caller event domain')
             domains[variable] = event_names
             continue
         if not variable.startswith('inputs.'):
@@ -342,6 +332,9 @@ def contexts(workflow, job, selector):
         definition = (events.get('workflow_dispatch') or {}).get('inputs', {}).get(name) or call
         if not isinstance(definition, dict):
             raise PolicyError(f'input {name} has no verified finite definition')
+        declared_type = (call or definition).get('type', 'string')
+        if declared_type not in ('string', 'choice', 'boolean'):
+            raise PolicyError(f'input {name} type {declared_type!r} has no verified finite domain')
         if not call and definition.get('type') == 'choice' and isinstance(definition.get('options'), list) and definition['options']:
             values = list(definition['options'])
         elif definition.get('type') == 'boolean':

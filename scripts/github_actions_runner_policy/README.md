@@ -71,6 +71,12 @@ como etiqueta, interpolación libre o JSON. Se rechazan contextos y sintaxis
 desconocidos y expansiones mayores a 4096 combinaciones. Las matrices dinámicas
 se rechazan cuando `runs-on` lee `matrix.*`; si el selector no depende de la
 matriz, todas sus filas conservan el mismo runner ya comprobado.
+Las entradas numéricas se rechazan: no se aproximan con valores string.
+Los reutilizables que usan `github.event_name` en el selector se rechazan porque
+ese contexto pertenece al caller. `format` y `contains` escalar requieren
+argumentos string; las conversiones implícitas no comprobadas fallan de forma
+cerrada. `contains` de arreglos usa igualdad de primitivas; una comparación
+string/primitiva mixta también se rechaza cuando necesitaría conversión numérica.
 
 Los reutilizables locales se recorren, con detección de ciclos. Un reutilizable
 remoto debe usar un SHA de 40 caracteres y tener una copia exacta revisada en
