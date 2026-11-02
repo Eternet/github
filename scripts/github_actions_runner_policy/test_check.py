@@ -35,7 +35,7 @@ class RunnerPolicyTests(unittest.TestCase):
                 self.assertTrue(any('GitHub-hosted' in error for error in errors), errors)
 
     def test_unknown_labels_and_groups_do_not_become_trusted(self):
-        for selector in ('unverified-large-runner', '[Linux, X64]', '{group: unknown, labels: self-hosted}'):
+        for selector in ('unverified-large-runner', '[Linux, X64]', '{group: unknown, labels: Linux}'):
             with self.subTest(selector=selector):
                 self.assertTrue(self.audit(self.workflow(selector)))
 
@@ -71,9 +71,20 @@ class RunnerPolicyTests(unittest.TestCase):
         extra = '    strategy:\n      matrix:\n        runner: [self-hosted, ubuntu-latest]\n        exclude:\n          - runner: ubuntu-latest\n'
         self.assertEqual([], self.audit(self.workflow("'${{ matrix.runner }}'", extra)))
 
-    def test_dynamic_matrix_is_rejected_even_with_self_hosted_anchor(self):
+    def test_dynamic_matrix_with_static_selector_cannot_change_runner_provenance(self):
         extra = '    strategy:\n      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}\n'
-        self.assertTrue(self.audit(self.workflow('[self-hosted, Linux]', extra)))
+        self.assertEqual([], self.audit(self.workflow('[self-hosted, Linux]', extra)))
+        self.assertTrue(any('GitHub-hosted' in error for error in self.audit(self.workflow('ubuntu-latest', extra))))
+
+    def test_dynamic_matrix_with_runner_variable_has_unverified_provenance(self):
+        extra = '    strategy:\n      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}\n'
+        self.assertTrue(self.audit(self.workflow("'${{ matrix.runner }}'", extra)))
+
+    def test_reserved_self_hosted_label_proves_ownership_inside_literal_group(self):
+        self.assertEqual([], self.audit(self.workflow('{group: default, labels: [self-hosted, Windows]}')))
+        self.assertTrue(self.audit(self.workflow('{group: unknown, labels: [Linux]}')))
+        errors = self.audit(self.workflow('{group: default, labels: [self-hosted, ubuntu-latest]}'))
+        self.assertTrue(any('GitHub-hosted' in error for error in errors), errors)
 
     def test_choice_inputs_every_branch_is_checked(self):
         content = '''on:

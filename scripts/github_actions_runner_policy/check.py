@@ -358,7 +358,10 @@ def contexts(workflow, job, selector):
             values.append('')
         domains[variable] = values
     count = 0
-    for row in matrix_rows(job):
+    # Matrix values cannot affect a selector that never reads matrix.*. Even a
+    # runtime-generated matrix then repeats the same statically proved runner.
+    rows = matrix_rows(job) if any(variable.startswith('matrix.') for variable in variables) else [{}]
+    for row in rows:
         for values in itertools.product(*domains.values()):
             count += 1
             if count > LIMIT:
@@ -374,14 +377,16 @@ def check_selector(selector):
         if set(selector) - {'group', 'labels'}:
             raise PolicyError('unsupported runs-on mapping keys')
         group = selector.get('group')
-        if 'group' in selector and (not isinstance(group, str) or group.lower() not in OWN_GROUPS):
-            raise PolicyError(f'unverified runner group {group!r}')
+        if 'group' in selector and (not isinstance(group, str) or not group.strip()):
+            raise PolicyError(f'invalid runner group {group!r}')
         selector = selector.get('labels', [])
     labels = [selector] if isinstance(selector, str) else selector
     if not isinstance(labels, list) or any(not isinstance(label, str) or not label.strip() for label in labels):
         raise PolicyError('runner labels must be nonempty literal strings')
     if any(HOSTED.match(label.strip()) for label in labels):
         raise PolicyError(f'GitHub-hosted runner label is forbidden: {labels!r}')
+    if group and group.lower() not in OWN_GROUPS and not any(label.lower() == 'self-hosted' for label in labels):
+        raise PolicyError(f'unverified runner group {group!r} without reserved self-hosted label')
     if not group and not any(label.lower() in OWN_LABELS for label in labels):
         raise PolicyError(f'runner selector has no verified Eternet provenance: {labels!r}')
 

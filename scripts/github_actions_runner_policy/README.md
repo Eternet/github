@@ -43,6 +43,9 @@ push/PR. La interfaz compartida entre repositorios es la acción compuesta.
 - `self-hosted` es la etiqueta reservada de runners propios. Puede combinarse
   con etiquetas de SO/capacidad. Una etiqueta hospedada (`ubuntu-*`,
   `windows-*`, `macos-*`, `github-hosted`) se rechaza incluso en ese arreglo.
+  También prueba propiedad dentro de un grupo literal (por ejemplo `default`)
+  sin cambiar la selección de grupo existente. Un grupo desconocido sin esa
+  etiqueta reservada no se admite.
 - Infraestructura propia registrada con `--no-default-labels`: `mini-pc-perf`,
   `minipc-perf-1` a `minipc-perf-4`, o el grupo `MiniPC-Perf`.
 - El scale set ARC propio `copilot-arc`.
@@ -65,7 +68,9 @@ como sustituto de la entrada real. Un string sin límite solo se admite si cada
 uso es una comparación de igualdad/desigualdad con un string literal: se prueban
 todos los literales y un representante del resto. Nunca se admite ese string
 como etiqueta, interpolación libre o JSON. Se rechazan contextos y sintaxis
-desconocidos, matrices dinámicas y expansiones mayores a 4096 combinaciones.
+desconocidos y expansiones mayores a 4096 combinaciones. Las matrices dinámicas
+se rechazan cuando `runs-on` lee `matrix.*`; si el selector no depende de la
+matriz, todas sus filas conservan el mismo runner ya comprobado.
 
 Los reutilizables locales se recorren, con detección de ciclos. Un reutilizable
 remoto debe usar un SHA de 40 caracteres y tener una copia exacta revisada en
