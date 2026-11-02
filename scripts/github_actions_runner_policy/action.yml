@@ -16,4 +16,4 @@ runs:
         trap 'rm -rf -- "$policy_venv"' EXIT
         python -m venv "$policy_venv"
         "$policy_venv/bin/python" -m pip install --disable-pip-version-check --only-binary=:all: PyYAML==6.0.3
-        "$policy_venv/bin/python" "$POLICY_ACTION_PATH/check.py" --root "$GITHUB_WORKSPACE"
+        "$policy_venv/bin/python" "$POLICY_ACTION_PATH/check.py" --root "$GITHUB_WORKSPACE" --git-ref HEAD
