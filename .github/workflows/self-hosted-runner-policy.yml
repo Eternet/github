@@ -29,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: ./scripts/github_actions_runner_policy
       - name: Verify policy and trigger regression cases

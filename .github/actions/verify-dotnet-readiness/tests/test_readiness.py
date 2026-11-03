@@ -23,6 +23,22 @@ switch ($args[0]) {
 }
 '''
 
+LAUNCHER = r'''
+[CmdletBinding()]
+param(
+    [string]$DotnetVersion = '', [string]$GlobalJsonFile = '',
+    [string]$WorkingDirectory = '.', [string]$Workspace,
+    [string]$DotnetCommand = 'dotnet'
+)
+try {
+    & $env:READINESS_SCRIPT @PSBoundParameters
+} catch {
+    # Assert the actual exception, independently of terminal width, ANSI styling and ErrorView.
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
+}
+'''
+
 
 class SdkReadinessTests(unittest.TestCase):
     @classmethod
@@ -43,6 +59,8 @@ class SdkReadinessTests(unittest.TestCase):
         self.output = self.root / "output.txt"
         self.shim = self.root / "dotnet-fixture.ps1"
         self.shim.write_text(SHIM, encoding="utf-8")
+        self.launcher = self.root / "invoke-readiness.ps1"
+        self.launcher.write_text(LAUNCHER, encoding="utf-8")
 
     def invoke(self, versions="10.0.x", *, global_file=None, installed=None,
                selected="10.0.301", list_exit=0, version_exit=0, command=None,
@@ -50,14 +68,15 @@ class SdkReadinessTests(unittest.TestCase):
         listing = installed if installed is not None else ["10.0.301 [synthetic/sdk]"]
         self.fixture.write_text(json.dumps({"list": listing, "version": selected,
             "listExit": list_exit, "versionExit": version_exit}), encoding="utf-8")
-        arguments = [PWSH, "-NoProfile", "-File", str(SCRIPT), "-Workspace", str(self.root),
+        arguments = [PWSH, "-NoProfile", "-File", str(self.launcher), "-Workspace", str(self.root),
                      "-WorkingDirectory", working_directory, "-DotnetCommand", str(command or self.shim)]
         if versions:
             arguments += ["-DotnetVersion", versions]
         if global_file is not None:
             arguments += ["-GlobalJsonFile", global_file]
         environment = {**os.environ, "READINESS_FIXTURE": str(self.fixture),
-                       "READINESS_CALLS": str(self.calls), "GITHUB_OUTPUT": str(self.output)}
+                       "READINESS_CALLS": str(self.calls), "GITHUB_OUTPUT": str(self.output),
+                       "READINESS_SCRIPT": str(SCRIPT)}
         return subprocess.run(arguments, env=environment, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=20)
 

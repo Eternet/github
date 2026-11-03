@@ -5,6 +5,19 @@ This action checks the shared runner prerequisite tracked by
 downloads or installs SDKs, changes host configuration, rewrites global.json,
 or removes tools needed by a subsequent Copilot session.
 
+Before the first SDK command, it sets `DOTNET_ADD_GLOBAL_TOOLS_TO_PATH=false`
+for this step and the following job steps. On Windows it removes from the job
+process PATH only nonexistent `actions-runner[-N]/_work/_temp/.../.dotnet/tools`
+directories left by temporary CLI homes. Existing directories, unrelated paths,
+order, duplicates and empty entries are preserved. If the remaining PATH still
+exceeds 8191 characters, it fails and requires shared profile repair.
+
+This containment never changes the persistent user/machine PATH, another
+process, runner configuration, services, SDKs or caches. It does not certify
+that a Listener inherited a repaired environment. Host repair remains a separate
+coordinated operation. Linux PATH is unchanged. Only removal counts and lengths
+are logged; the PATH value is not printed.
+
 The input names `dotnet-version` and `global-json-file` match setup-dotnet.
 Version requirements support exact stable/preview SDK versions, major/minor
 channels, `x`/`*`, and feature-band wildcards such as `10.0.3xx`. Multiline
