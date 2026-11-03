@@ -1,0 +1,23 @@
+name: Installed dotnet readiness tests
+on:
+  pull_request:
+    paths:
+      - .github/actions/verify-dotnet-readiness/**
+      - .github/workflows/dotnet-readiness-tests.yml
+permissions:
+  contents: read
+jobs:
+  command-fixtures:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Windows]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check installed SDK and runtime selection without native dotnet calls
+        shell: pwsh
+        run: |
+          python -B -m unittest discover -s .github/actions/verify-dotnet-readiness/tests -p 'test_*.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Installed dotnet command fixtures failed.' }

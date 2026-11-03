@@ -36,6 +36,34 @@ follows that checkout's existing global.json, or the installed host's selection
 rules when there is no source SDK pin. Presence checks do not create a new pin.
 The `dotnet-version` output reports the actual selected SDK.
 
+For callers replacing setup-dotnet's last requested SDK output, opt in to
+`sdk-selection: last-requested`. When neither the source nor its ancestors have
+a global.json, the action chooses the highest installed match for the last
+selector and verifies that exact SDK with the native resolver using a temporary
+pin. It removes its temporary file and never writes a source pin. Any existing
+global.json retains precedence, including rollForward and allowPrerelease.
+The default `source` behavior is unchanged. `dotnet-root` reports the existing
+resolved host root so callers can restore it after a separate tool action.
+
+Declare application runtimes separately from build SDKs, for example:
+
+```yaml
+- uses: Eternet/github/.github/actions/verify-dotnet-readiness@INTEGRATED_COMMIT
+  with:
+    dotnet-version: |
+      9.0.x
+      10.0.x
+    sdk-selection: last-requested
+    runtime-version: |
+      Microsoft.NETCore.App 9.0.x
+      Microsoft.AspNetCore.App 9.0.x
+```
+
+Every runtime must be present in `dotnet --list-runtimes` from that same host.
+A newer runtime or a different runtime family cannot satisfy a missing target.
+No SDK/runtime is downloaded, installed or removed, and no successful output is
+published when inventory or native resolution fails.
+
 ```yaml
 - uses: Eternet/github/.github/actions/verify-dotnet-readiness@INTEGRATED_COMMIT
   with:
