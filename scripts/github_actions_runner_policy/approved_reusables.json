@@ -1,6 +1,0 @@
-{
-  "Eternet/github/.github/workflows/update_editorconfig.yml@a3aff8b087edb7e8e0e86b7cdb1ba2e140d4643c": {
-    "content": "name: Update .editorconfig\n\non:\n  workflow_call:\n    inputs:\n      editorconfig-path:\n        required: true\n        type: string\n\njobs:\n  update_editorconfig:\n    runs-on: [self-hosted, Windows]\n    steps:\n      - name: Checkout repository\n        uses: actions/checkout@v4\n\n      - name: Clone Eternet/github repository\n        run: git clone --depth 1 https://github.com/Eternet/github.git tmp_eternet_github_repo\n\n      - name: Copy .editorconfig from cloned repository\n        run: cp tmp_eternet_github_repo/files/.editorconfig ${{ inputs.editorconfig-path }}\n        \n      - name: Commit and push changes\n        run: |\n          git config --global user.name \"GithubActionBot\"\n          git config --global user.email \"<>\"\n          git add ${{ inputs.editorconfig-path }}\n          git commit -m \"Update .editorconfig\"\n          git push\n",
-    "sha256": "01c759666f0d4512460ca5dd5bbca2a4dd5880cc55ea19cba9134ff94bea9ca4"
-  }
-}
