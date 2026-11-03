@@ -1,5 +1,5 @@
 name: Verify provisioned .NET SDKs
-description: Check centrally installed SDKs and source SDK resolution without installing or changing tools.
+description: Prepare the job process environment and check provisioned SDKs without changing host configuration or tools.
 inputs:
   dotnet-version:
     description: SDK versions to require, one per line, as in setup-dotnet.
@@ -24,12 +24,15 @@ runs:
       id: readiness
       shell: pwsh
       env:
+        DOTNET_ADD_GLOBAL_TOOLS_TO_PATH: 'false'
         READINESS_ACTION_PATH: ${{ github.action_path }}
         READINESS_WORKSPACE: ${{ github.workspace }}
         READINESS_DOTNET_VERSIONS: ${{ inputs.dotnet-version }}
         READINESS_GLOBAL_JSON: ${{ inputs.global-json-file }}
         READINESS_WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
+        . (Join-Path $env:READINESS_ACTION_PATH 'Prepare-RunnerProcessEnvironment.ps1')
+        Initialize-RunnerProcessEnvironment
         & (Join-Path $env:READINESS_ACTION_PATH 'Assert-DotnetReadiness.ps1') `
           -DotnetVersion $env:READINESS_DOTNET_VERSIONS `
           -GlobalJsonFile $env:READINESS_GLOBAL_JSON `
