@@ -13,12 +13,14 @@ PWSH = shutil.which("pwsh")
 ISSUE = "https://github.com/Eternet/Servidores/issues/554"
 SHIM = r'''
 $fixture = Get-Content -LiteralPath $env:READINESS_FIXTURE -Raw | ConvertFrom-Json
-@{ arguments = @($args); directory = (Get-Location).Path } |
+$pin=if(Test-Path -LiteralPath 'global.json'){Get-Content -LiteralPath 'global.json' -Raw|ConvertFrom-Json}else{$null}
+@{ arguments = @($args); directory = (Get-Location).Path; pin=$pin; globalTools=$env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH } |
     ConvertTo-Json -Compress | Add-Content -LiteralPath $env:READINESS_CALLS
 if ($args.Count -ne 1) { throw 'Unexpected command arguments.' }
 switch ($args[0]) {
     '--list-sdks' { $fixture.list | Write-Output; exit $fixture.listExit }
-    '--version' { $fixture.version | Write-Output; exit $fixture.versionExit }
+    '--version' { if($fixture.resolvePin -and $pin){$pin.sdk.version|Write-Output}else{$fixture.version | Write-Output}; exit $fixture.versionExit }
+    '--list-runtimes' { $fixture.runtimes | Write-Output; exit $fixture.runtimeExit }
     default { throw "Readiness attempted a mutating/unexpected dotnet command: $($args[0])" }
 }
 '''
@@ -28,7 +30,8 @@ LAUNCHER = r'''
 param(
     [string]$DotnetVersion = '', [string]$GlobalJsonFile = '',
     [string]$WorkingDirectory = '.', [string]$Workspace,
-    [string]$DotnetCommand = 'dotnet'
+    [string]$DotnetCommand = 'dotnet',
+    [string]$SdkSelection='source', [string]$RuntimeVersion=''
 )
 try {
     & $env:READINESS_SCRIPT @PSBoundParameters
@@ -64,12 +67,17 @@ class SdkReadinessTests(unittest.TestCase):
 
     def invoke(self, versions="10.0.x", *, global_file=None, installed=None,
                selected="10.0.301", list_exit=0, version_exit=0, command=None,
-               working_directory="."):
+               working_directory=".", selection="source", runtimes="", installed_runtimes=None,
+               runtime_exit=0, resolve_pin=False):
         listing = installed if installed is not None else ["10.0.301 [synthetic/sdk]"]
         self.fixture.write_text(json.dumps({"list": listing, "version": selected,
-            "listExit": list_exit, "versionExit": version_exit}), encoding="utf-8")
+            "listExit": list_exit, "versionExit": version_exit, "resolvePin":resolve_pin,
+            "runtimes":installed_runtimes or [], "runtimeExit":runtime_exit}), encoding="utf-8")
         arguments = [PWSH, "-NoProfile", "-File", str(self.launcher), "-Workspace", str(self.root),
                      "-WorkingDirectory", working_directory, "-DotnetCommand", str(command or self.shim)]
+        arguments += ["-SdkSelection", selection]
+        if runtimes:
+            arguments += ["-RuntimeVersion", runtimes]
         if versions:
             arguments += ["-DotnetVersion", versions]
         if global_file is not None:
@@ -96,7 +104,83 @@ class SdkReadinessTests(unittest.TestCase):
             "9.0.305 [synthetic/sdk]", "10.0.301 [synthetic/sdk]"])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual([call["arguments"] for call in self.recorded()], [["--list-sdks"], ["--version"]])
-        self.assertEqual(self.output.read_text(encoding="utf-8-sig").strip(), "dotnet-version=10.0.301")
+        self.assertEqual(self.outputs(), {"dotnet-version":"10.0.301", "dotnet-root":str(self.root)})
+
+    def outputs(self):
+        return dict(line.split("=",1) for line in self.output.read_text(encoding="utf-8-sig").splitlines())
+
+    def test_last_requested_selects_highest_installed_match_and_verifies_native_resolution(self):
+        result=self.invoke("9.0.x\n10.0.x", selection="last-requested", selected="11.0.100", resolve_pin=True,
+            installed=["9.0.320 [synthetic/sdk]", "10.0.99 [synthetic/sdk]", "10.0.401 [synthetic/sdk]", "11.0.100 [synthetic/sdk]"])
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(self.outputs(),{"dotnet-version":"10.0.401","dotnet-root":str(self.root)})
+        calls=self.recorded()
+        self.assertEqual([c["arguments"] for c in calls],[["--list-sdks"],["--version"]])
+        self.assertEqual(calls[1]["pin"]["sdk"],{"version":"10.0.401","rollForward":"disable","allowPrerelease":False})
+        self.assertEqual(calls[1]["globalTools"],"false")
+        self.assertFalse(Path(calls[1]["directory"]).exists(),"Owned selection directory must be removed")
+        self.assertFalse((self.root/"global.json").exists(),"Source must never be pinned by readiness")
+
+    def test_last_requested_preserves_explicit_source_global_json_policy(self):
+        pin=self.source/"global.json"
+        content='{"sdk":{"version":"9.0.300","rollForward":"latestPatch","allowPrerelease":false}}'
+        pin.write_text(content,encoding="utf-8")
+        result=self.invoke("9.0.x\n10.0.x",selection="last-requested",global_file="source/global.json",
+            installed=["9.0.320 [synthetic/sdk]","10.0.401 [synthetic/sdk]"],selected="9.0.320")
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(self.outputs()["dotnet-version"],"9.0.320")
+        self.assertEqual(pin.read_text(encoding="utf-8"),content)
+        self.assertEqual([Path(c["directory"]) for c in self.recorded()],[self.source,self.source])
+
+    def test_last_requested_respects_implicit_ancestor_global_json(self):
+        pin=self.root/"global.json"
+        content='{"sdk":{"version":"9.0.320","rollForward":"disable"}}'
+        pin.write_text(content,encoding="utf-8")
+        result=self.invoke("9.0.x\n10.0.x",selection="last-requested",working_directory="source",
+            installed=["9.0.320 [synthetic/sdk]","10.0.401 [synthetic/sdk]"],selected="9.0.320")
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(self.outputs()["dotnet-version"],"9.0.320")
+        self.assertEqual(pin.read_text(encoding="utf-8"),content)
+        self.assertEqual([Path(c["directory"]) for c in self.recorded()],[self.source,self.source])
+
+    def test_last_requested_rejects_native_resolution_of_a_different_installed_sdk(self):
+        result=self.invoke(selection="last-requested",selected="11.0.100",
+            installed=["10.0.301 [synthetic/sdk]","11.0.100 [synthetic/sdk]"])
+        self.assert_rejected(result,"did not resolve the requested SDK candidate")
+        self.assertFalse(Path(self.recorded()[1]["directory"]).exists())
+
+    def test_runtime_requirements_verify_both_families_from_the_selected_host(self):
+        result=self.invoke(runtimes="Microsoft.NETCore.App 9.0.x\nMicrosoft.AspNetCore.App 9.0.x",
+            installed_runtimes=["Microsoft.NETCore.App 9.0.11 [synthetic/shared]","Microsoft.AspNetCore.App 9.0.11 [synthetic/shared]"])
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual([c["arguments"] for c in self.recorded()],[["--list-sdks"],["--version"],["--list-runtimes"]])
+        self.assertEqual(self.outputs()["dotnet-version"],"10.0.301")
+
+    def test_missing_target_runtime_fails_even_with_both_sdk_families_installed(self):
+        result=self.invoke("9.0.x\n10.0.x",runtimes="Microsoft.NETCore.App 9.0.x",
+            installed=["9.0.320 [synthetic/sdk]","10.0.301 [synthetic/sdk]"],
+            installed_runtimes=["Microsoft.NETCore.App 10.0.1 [synthetic/shared]"])
+        self.assert_rejected(result,"Required runtime 'Microsoft.NETCore.App 9.0.x' is missing")
+
+    def test_netcore_runtime_does_not_substitute_for_aspnetcore_runtime(self):
+        result=self.invoke(runtimes="Microsoft.AspNetCore.App 9.0.x",
+            installed_runtimes=["Microsoft.NETCore.App 9.0.11 [synthetic/shared]","Microsoft.AspNetCore.App 10.0.1 [synthetic/shared]"])
+        self.assert_rejected(result,"Required runtime 'Microsoft.AspNetCore.App 9.0.x' is missing")
+
+    def test_failed_runtime_inventory_is_unknown_and_never_exports_success(self):
+        result=self.invoke(runtimes="Microsoft.NETCore.App 9.0.x",runtime_exit=1)
+        self.assert_rejected(result,"dotnet --list-runtimes failed")
+
+    def test_malformed_runtime_requirements_fail_before_native_execution(self):
+        result=self.invoke(runtimes="Microsoft.NETCore.App 9.0.x; install")
+        self.assert_rejected(result,"Unsupported runtime requirement")
+        self.assertEqual(self.recorded(),[])
+
+    def test_source_selection_default_keeps_native_host_behavior(self):
+        result=self.invoke(installed=["10.0.301 [synthetic/sdk]","11.0.100 [synthetic/sdk]"],selected="11.0.100")
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(self.outputs()["dotnet-version"],"11.0.100")
+        self.assertEqual([Path(c["directory"]) for c in self.recorded()],[self.root,self.root])
 
     def test_one_missing_requested_sdk_fails_before_resolution(self):
         result = self.invoke("9.0.x\n10.0.x", installed=["10.0.301 [synthetic/sdk]"])

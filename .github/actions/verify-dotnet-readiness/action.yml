@@ -13,10 +13,21 @@ inputs:
     description: Checkout directory, relative to github.workspace unless absolute.
     required: false
     default: '.'
+  sdk-selection:
+    description: Use source SDK resolution, or the last requested installed SDK when the source has no global.json.
+    required: false
+    default: source
+  runtime-version:
+    description: Required installed runtimes, one 'Microsoft.NETCore.App 9.0.x' or 'Microsoft.AspNetCore.App 9.0.x' per line.
+    required: false
+    default: ''
 outputs:
   dotnet-version:
     description: Actual SDK selected by the source checkout.
     value: ${{ steps.readiness.outputs.dotnet-version }}
+  dotnet-root:
+    description: Existing root of the resolved dotnet executable, for restoring the application host after tool setup.
+    value: ${{ steps.readiness.outputs.dotnet-root }}
 runs:
   using: composite
   steps:
@@ -30,11 +41,15 @@ runs:
         READINESS_DOTNET_VERSIONS: ${{ inputs.dotnet-version }}
         READINESS_GLOBAL_JSON: ${{ inputs.global-json-file }}
         READINESS_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        READINESS_SDK_SELECTION: ${{ inputs.sdk-selection }}
+        READINESS_RUNTIME_VERSIONS: ${{ inputs.runtime-version }}
       run: |
         . (Join-Path $env:READINESS_ACTION_PATH 'Prepare-RunnerProcessEnvironment.ps1')
         Initialize-RunnerProcessEnvironment
         & (Join-Path $env:READINESS_ACTION_PATH 'Assert-DotnetReadiness.ps1') `
           -DotnetVersion $env:READINESS_DOTNET_VERSIONS `
           -GlobalJsonFile $env:READINESS_GLOBAL_JSON `
+          -SdkSelection $env:READINESS_SDK_SELECTION `
+          -RuntimeVersion $env:READINESS_RUNTIME_VERSIONS `
           -WorkingDirectory $env:READINESS_WORKING_DIRECTORY `
           -Workspace $env:READINESS_WORKSPACE
